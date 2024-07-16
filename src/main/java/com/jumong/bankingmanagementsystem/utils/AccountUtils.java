@@ -1,5 +1,7 @@
 package com.jumong.bankingmanagementsystem.utils;
 
+import com.jumong.bankingmanagementsystem.dtos.response.AccountInfo;
+
 import java.time.Year;
 
 public class AccountUtils {
@@ -18,9 +20,20 @@ public class AccountUtils {
 
     public static final String ACCOUNT_FOUND_CODE = "004";
 
-    public static final String ACCOUNT_FOUND_MESSAGE = "User Account Found";
+    public static final String ACCOUNT_FOUND_MESSAGE = "User with provided account number does not exist";
     public static final String ACCOUNT_CREDIT_SUCCESSFUL_CODE = "005";
     public static final String ACCOUNT_CREDIT_SUCCESSFUL_MESSAGE = "CREDIT SUCCESSFUL";
+    public static final String INSUFFICIENT_BALANCE_CODE = "006";
+
+    public static final String INSUFFICIENT_BALANCE_MESSAGE = "Insufficient Fund!";
+    public static final String ACCOUNT_DEBIT_CODE = "007";
+    public static final String ACCOUNT_DEBIT_MESSAGE = "Debit Successful";
+    public static final String INVALID_TRANSACTION_CODE = "008";
+
+    public static final String INVALID_TRANSACTION_MESSAGE = "Invalid transaction";
+    public static final String ACCOUNT_TRANSFER_SUCCESSFUL_CODE = "009";
+
+    public static final String ACCOUNT_TRANSFER_SUCCESSFUL_MESSAGE = "Transfer Successful";
 
     public static String generateAccountNumber() {
         Year currentYear = Year.now();

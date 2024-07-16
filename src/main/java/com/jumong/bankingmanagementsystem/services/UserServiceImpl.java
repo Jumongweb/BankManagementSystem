@@ -2,9 +2,7 @@ package com.jumong.bankingmanagementsystem.services;
 
 import com.jumong.bankingmanagementsystem.data.models.User;
 import com.jumong.bankingmanagementsystem.data.repositories.UserRepository;
-import com.jumong.bankingmanagementsystem.dtos.request.CreditRequest;
-import com.jumong.bankingmanagementsystem.dtos.request.EnquiryRequest;
-import com.jumong.bankingmanagementsystem.dtos.request.UserRequest;
+import com.jumong.bankingmanagementsystem.dtos.request.*;
 import com.jumong.bankingmanagementsystem.dtos.response.AccountInfo;
 import com.jumong.bankingmanagementsystem.dtos.response.BankResponse;
 import com.jumong.bankingmanagementsystem.dtos.response.EmailDetails;
@@ -22,6 +20,9 @@ public class UserServiceImpl implements UserService{
 
     @Autowired
     private EmailService emailService;
+
+    @Autowired
+    private TransactionService transactionService;
 
     @Override
     public BankResponse createAccount(UserRequest userRequest) {
@@ -128,8 +129,17 @@ public class UserServiceImpl implements UserService{
         }
 
         User userToCredit = userRepository.findUserByAccountNumber(creditRequest.getAccountNumber());
-        BigDecimal balance = userToCredit.getAccountBalance();
-        userToCredit.setAccountBalance(balance.add(creditRequest.getAmount()));
+        userToCredit.setAccountBalance(userToCredit.getAccountBalance().add(creditRequest.getAmount()));
+        userRepository.save(userToCredit);
+
+        TransactionRequest transactionRequest = TransactionRequest.builder()
+                .accountNumber(userToCredit.getAccountNumber())
+                .transactionType("CREDIT")
+                .amount(creditRequest.getAmount())
+                .build();
+
+        transactionService.saveTransaction(transactionRequest);
+
         return BankResponse.builder()
                 .responseCode(AccountUtils.ACCOUNT_CREDIT_SUCCESSFUL_CODE)
                 .responseMessage(AccountUtils.ACCOUNT_CREDIT_SUCCESSFUL_MESSAGE)
@@ -137,6 +147,130 @@ public class UserServiceImpl implements UserService{
                         .accountNumber(userToCredit.getAccountNumber())
                         .accountName(userToCredit.getFirstName() + " " + userToCredit.getLastName() + " " + userToCredit.getOtherName())
                         .accountBalance(userToCredit.getAccountBalance())
+                        .build())
+                .build();
+    }
+
+    @Override
+    public BankResponse debitAccount(DebitRequest debitRequest) {
+        Boolean isExistingAccount = userRepository.existsByAccountNumber(debitRequest.getAccountNumber());
+        if (!isExistingAccount){
+            return BankResponse.builder()
+                    .responseCode(AccountUtils.ACCOUNT_DOES_NOT_EXIST)
+                    .responseMessage(AccountUtils.ACCOUNT_FOUND_MESSAGE)
+                    .accountInfo(null)
+                    .build();
+        }
+
+        User userToDebit = userRepository.findUserByAccountNumber(debitRequest.getAccountNumber());
+        if (debitRequest.getAmount().intValue() < 0){
+            return BankResponse.builder()
+                    .responseCode(AccountUtils.INVALID_TRANSACTION_CODE)
+                    .responseMessage(AccountUtils.INVALID_TRANSACTION_MESSAGE)
+                    .accountInfo(null)
+                    .build();
+        }
+
+        if (userToDebit.getAccountBalance().compareTo(debitRequest.getAmount()) < 0) {
+            return BankResponse.builder()
+                    .responseCode(AccountUtils.INSUFFICIENT_BALANCE_CODE)
+                    .responseMessage(AccountUtils.INSUFFICIENT_BALANCE_MESSAGE)
+                    .accountInfo(null)
+                .build();
+
+        } else {
+            userToDebit.setAccountBalance(userToDebit.getAccountBalance().subtract(debitRequest.getAmount()));
+            userRepository.save(userToDebit);
+
+            TransactionRequest transactionRequest = TransactionRequest.builder()
+                    .accountNumber(userToDebit.getAccountNumber())
+                    .transactionType("CREDIT")
+                    .amount(debitRequest.getAmount())
+                    .build();
+
+            transactionService.saveTransaction(transactionRequest);
+
+            return BankResponse.builder()
+                    .responseCode(AccountUtils.ACCOUNT_DEBIT_CODE)
+                    .responseMessage(AccountUtils.ACCOUNT_DEBIT_MESSAGE)
+                    .accountInfo(AccountInfo.builder()
+                            .accountNumber(userToDebit.getAccountNumber())
+                            .accountName(userToDebit.getFirstName() + " " + userToDebit.getLastName() + " " + userToDebit.getOtherName())
+                            .accountBalance(userToDebit.getAccountBalance())
+                            .build())
+                    .build();
+        }
+
+    }
+
+    @Override
+    public BankResponse transfer(TransferRequest transferRequest) {
+        Boolean senderAccountExist = userRepository.existsByAccountNumber(transferRequest.getSenderAccount());
+        Boolean receiverAccountExist = userRepository.existsByAccountNumber(transferRequest.getReceiverAccount());
+
+        if ((!senderAccountExist) || (!receiverAccountExist)){
+            return BankResponse.builder()
+                    .responseCode(AccountUtils.ACCOUNT_DOES_NOT_EXIST)
+                    .responseMessage(AccountUtils.ACCOUNT_DOES_NOT_EXIST)
+                    .accountInfo(null)
+                    .build();
+        }
+
+        User senderAccount = userRepository.findUserByAccountNumber(transferRequest.getSenderAccount());
+        User receiverAccount = userRepository.findUserByAccountNumber(transferRequest.getReceiverAccount());
+
+        if (senderAccount.getAccountBalance().compareTo(transferRequest.getAmount()) < 0) {
+            return BankResponse.builder()
+                    .responseCode(AccountUtils.INSUFFICIENT_BALANCE_CODE)
+                    .responseMessage(AccountUtils.INSUFFICIENT_BALANCE_MESSAGE)
+                    .accountInfo(null)
+                    .build();
+        }
+
+        senderAccount.setAccountBalance(senderAccount.getAccountBalance().subtract(transferRequest.getAmount()));
+        receiverAccount.setAccountBalance(receiverAccount.getAccountBalance().add(transferRequest.getAmount()));
+        userRepository.save(senderAccount);
+        userRepository.save(receiverAccount);
+
+        EmailDetails debitAlert = EmailDetails.builder()
+                .subject("DEBIT ALERT")
+                .messageBody("The sum of " + transferRequest.getAmount() + " has been deducted from your account. You current balance is " + senderAccount.getAccountBalance())
+                .recipient(senderAccount.getEmail())
+                .build();
+
+        emailService.sendEmailAlert(debitAlert);
+        TransactionRequest transactionRequest = TransactionRequest.builder()
+                .accountNumber(senderAccount.getAccountNumber())
+                .transactionType("DEBIT")
+                .amount(transferRequest.getAmount())
+                .build();
+
+        transactionService.saveTransaction(transactionRequest);
+
+        String username = senderAccount.getFirstName() + " " + senderAccount.getLastName() + " " + senderAccount.getOtherName();
+
+        EmailDetails creditAlert = EmailDetails.builder()
+                .subject("CREDIT ALERT")
+                .recipient(receiverAccount.getEmail())
+                .messageBody("The sum of " + transferRequest.getAmount() + " has been sent to your account from " + username)
+                .build();
+        emailService.sendEmailAlert(creditAlert);
+
+//        TransactionRequest receivertransactionRequest = TransactionRequest.builder()
+//                .accountNumber(receiverAccount.getAccountNumber())
+//                .transactionType("CREDIT")
+//                .amount(transferRequest.getAmount())
+//                .build();
+//
+//        transactionService.saveTransaction(transactionRequest);
+
+        return BankResponse.builder()
+                .responseCode(AccountUtils.ACCOUNT_TRANSFER_SUCCESSFUL_CODE)
+                .responseMessage(AccountUtils.ACCOUNT_TRANSFER_SUCCESSFUL_MESSAGE)
+                .accountInfo(AccountInfo.builder()
+                        .accountNumber(senderAccount.getAccountNumber())
+                        .accountName(senderAccount.getFirstName() + " " + senderAccount.getLastName() + " " + senderAccount.getOtherName())
+                        .accountBalance(senderAccount.getAccountBalance())
                         .build())
                 .build();
     }
